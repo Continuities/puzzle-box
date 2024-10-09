@@ -1,31 +1,26 @@
 #include <Adafruit_LSM6DS3TRC.h>
 #include <Adafruit_LSM6DS33.h>
-#include <MadgwickAHRS.h>
 
-#define SENSOR_RATE 104.00
-#define DEAD_ZONE 0.2
-#define GYRO_SMOOTHING 0.0
-#define ROLL_SMOOTHING 0.0
-#define GYRO_RATE 60 // per second
 
 Adafruit_LSM6DS3TRC lsm6ds3trc; // accelerometer, gyroscope
 Adafruit_LSM6DS33 lsm6ds33;
-Madgwick filter;
 
 bool new_rev = true;
 long int accel_array[6];
 long int check_array[6]={0.00, 0.00, 0.00, 0.00, 0.00, 0.00};
 
-uint32_t lastGyro;
-float accel_x, accel_y, accel_z;
-float gyro_x, gyro_y, gyro_z;
-float currentRoll = 0;
-float rollFilteredOld;
-float smoothedGyro = 0;
+float accelX,            accelY,             accelZ,            // units m/s/s i.e. accelZ if often 9.8 (gravity)
+      gyroX,             gyroY,              gyroZ,             // units dps (degrees per second)
+      gyroDriftX,        gyroDriftY,         gyroDriftZ,        // units dps
+      gyroRoll,          gyroPitch,          gyroYaw,           // units degrees (expect major drift)
+      gyroCorrectedRoll, gyroCorrectedPitch, gyroCorrectedYaw,  // units degrees (expect minor drift)
+      accRoll,           accPitch,           accYaw,            // units degrees (roll and pitch noisy, yaw not possible)
+      complementaryRoll, complementaryPitch, complementaryYaw;  // units degrees (excellent roll, pitch, yaw minor drift)
 
-void setup() {
-  Serial.begin(115200);
-  filter.begin(SENSOR_RATE);
+long lastTime;
+long lastInterval;
+
+void initIMU() {
   lsm6ds33.begin_I2C();
   // check for readings from LSM6DS33
   sensors_event_t accel;
@@ -51,7 +46,44 @@ void setup() {
   }
 }
 
-void loop() {
+/*
+  the gyro's x,y,z values drift by a steady amount. if we measure this when arduino is still
+  we can correct the drift when doing real measurements later
+*/
+void calibrateIMU(int delayMillis, int calibrationMillis) {
+
+  int calibrationCount = 0;
+
+  delay(delayMillis); // to avoid shakes after pressing reset button
+
+  float sumX, sumY, sumZ;
+  int startTime = millis();
+  while (millis() < startTime + calibrationMillis) {
+    if (readIMU()) {
+      // in an ideal world gyroX/Y/Z == 0, anything higher or lower represents drift
+      sumX += gyroX;
+      sumY += gyroY;
+      sumZ += gyroZ;
+
+      calibrationCount++;
+    }
+  }
+
+  if (calibrationCount == 0) {
+    Serial.println("Failed to calibrate");
+  }
+
+  gyroDriftX = sumX / calibrationCount;
+  gyroDriftY = sumY / calibrationCount;
+  gyroDriftZ = sumZ / calibrationCount;
+
+}
+
+/**
+   Read accel and gyro data.
+   returns true if value is 'new' and false if IMU is returning old cached data
+*/
+bool readIMU() {
   sensors_event_t accel;
   sensors_event_t gyro;
   sensors_event_t temp;
@@ -62,39 +94,66 @@ void loop() {
   else {
     lsm6ds33.getEvent(&accel, &gyro, &temp);
   }
-  accel_x = accel.acceleration.x;
-  accel_y = accel.acceleration.y;
-  accel_z = accel.acceleration.z;
-  gyro_x = gyro.gyro.x;
-  gyro_y = gyro.gyro.y;
-  gyro_z = gyro.gyro.z;
+  accelX = accel.acceleration.x;
+  accelY = accel.acceleration.y;
+  accelZ = accel.acceleration.z;
+  gyroX = gyro.gyro.x;
+  gyroY = gyro.gyro.y;
+  gyroZ = gyro.gyro.z;
+  return true;
+}
 
-  filter.updateIMU(gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z);
-  roll = filter.getRoll();
-  float rollFiltered = (1.0 - ROLL_SMOOTHING) * roll + ROLL_SMOOTHING * rollFilteredOld; // low pass filter
-  rollFilteredOld = rollFiltered;
+/**
+   I'm expecting, over time, the Arduino_LSM6DS3.h will add functions to do most of this,
+   but as of 1.0.0 this was missing.
+*/
+void doCalculations() {
+  accRoll = atan2(accelY, accelZ) * 180 / M_PI;
+  accPitch = atan2(-accelX, sqrt(accelY * accelY + accelZ * accelZ)) * 180 / M_PI;
 
-  if (abs(gyro_x) < DEAD_ZONE) {
-    gyro_x = 0;
+  float lastFrequency = (float) 1000000.0 / lastInterval;
+  gyroRoll = gyroRoll + (gyroX / lastFrequency);
+  gyroPitch = gyroPitch + (gyroY / lastFrequency);
+  gyroYaw = gyroYaw + (gyroZ / lastFrequency);
+
+  gyroCorrectedRoll = gyroCorrectedRoll + ((gyroX - gyroDriftX) / lastFrequency);
+  gyroCorrectedPitch = gyroCorrectedPitch + ((gyroY - gyroDriftY) / lastFrequency);
+  gyroCorrectedYaw = gyroCorrectedYaw + ((gyroZ - gyroDriftZ) / lastFrequency);
+
+  complementaryRoll = complementaryRoll + ((gyroX - gyroDriftX) / lastFrequency);
+  complementaryPitch = complementaryPitch + ((gyroY - gyroDriftY) / lastFrequency);
+  complementaryYaw = complementaryYaw + ((gyroZ - gyroDriftZ) / lastFrequency);
+
+  complementaryRoll = 0.98 * complementaryRoll + 0.02 * accRoll;
+  complementaryPitch = 0.98 * complementaryPitch + 0.02 * accPitch;
+}
+
+/**
+   This comma separated format is best 'viewed' using 'serial plotter' or processing.org client (see ./processing/RollPitchYaw3d.pde example)
+*/
+void printCalculations() {
+  Serial.print("complementaryRoll:");
+  Serial.print(complementaryRoll);
+  Serial.println("");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  initIMU();
+  calibrateIMU(250, 250);
+
+  lastTime = micros();
+}
+
+void loop() {
+  if (readIMU()) {
+    long currentTime = micros();
+    lastInterval = currentTime - lastTime; // expecting this to be ~104Hz +- 4%
+    lastTime = currentTime;
+
+    doCalculations();
+    printCalculations();
+
   }
-  smoothedGyro = (1.0 - GYRO_SMOOTHING) * gyro_x + GYRO_SMOOTHING * smoothedGyro;
-
-  if (millis() - lastGyro >= 1000 / GYRO_RATE) {
-    currentRoll += smoothedGyro;
-    // Serial.println(currentRoll);
-  }
-  // Serial.print(accel_x);
-  // Serial.print(" ");
-  // Serial.println(accel_y);
-  // Serial.print(" ");
-  // Serial.println(accel_z);
-  // Serial.print("Gyro: ");
-  // Serial.println(gyro_x);
-  // Serial.print(" ");
-  // Serial.print(gyro_y);
-  // Serial.print(" ");
-  // Serial.println(gyro_z);
-
-  Serial.println(roll);
-
 }
