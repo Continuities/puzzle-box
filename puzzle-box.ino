@@ -1,6 +1,22 @@
 #include <Adafruit_LSM6DS3TRC.h>
 #include <Adafruit_LSM6DS33.h>
 
+#define SQUARE_BUTTON_PIN 12
+#define SILVER_BUTTON_PIN 11
+#define RED_SWITCH_PIN 10
+#define GREEN_SWITCH_PIN 9
+#define BLUE_SWITCH_PIN 6
+
+struct ButtonState {
+  uint32_t pin;
+  bool pushed;
+  bool pushed_this_frame;
+};
+
+struct SwitchState {
+  uint32_t pin;
+  bool switched_on;
+};
 
 Adafruit_LSM6DS3TRC lsm6ds3trc; // accelerometer, gyroscope
 Adafruit_LSM6DS33 lsm6ds33;
@@ -8,6 +24,13 @@ Adafruit_LSM6DS33 lsm6ds33;
 bool new_rev = true;
 long int accel_array[6];
 long int check_array[6]={0.00, 0.00, 0.00, 0.00, 0.00, 0.00};
+
+// inputs
+ButtonState square_button = { SQUARE_BUTTON_PIN, false, false };
+ButtonState silver_button = { SILVER_BUTTON_PIN, false, false };
+SwitchState red_switch = { RED_SWITCH_PIN, false };
+SwitchState green_switch = { GREEN_SWITCH_PIN, false };
+SwitchState blue_switch = { BLUE_SWITCH_PIN, false };
 
 float accelX,            accelY,             accelZ,            // units m/s/s i.e. accelZ if often 9.8 (gravity)
       gyroX,             gyroY,              gyroZ,             // units dps (degrees per second)
@@ -131,15 +154,69 @@ void doCalculations() {
 /**
    This comma separated format is best 'viewed' using 'serial plotter' or processing.org client (see ./processing/RollPitchYaw3d.pde example)
 */
-void printCalculations() {
+void printIMUCalculations() {
   Serial.print("complementaryRoll:");
   Serial.print(complementaryRoll);
+  Serial.println("");
+}
+
+void initInputs() {
+  pinMode(square_button.pin, INPUT_PULLUP);
+  pinMode(silver_button.pin, INPUT_PULLUP);
+  pinMode(red_switch.pin, INPUT_PULLUP);
+  pinMode(green_switch.pin, INPUT_PULLUP);
+  pinMode(blue_switch.pin, INPUT_PULLUP);
+}
+
+void readButton(ButtonState *button_state) {
+  bool pushed = digitalRead(button_state->pin) == LOW;
+  button_state->pushed_this_frame = pushed && !button_state->pushed;
+  button_state->pushed = pushed;
+}
+
+void readButtons() {
+  readButton(&square_button);
+  readButton(&silver_button);
+}
+
+void readSwitch(SwitchState *switch_state) {
+  switch_state->switched_on = digitalRead(switch_state->pin) == LOW;
+}
+
+void readSwitches() {
+  readSwitch(&red_switch);
+  readSwitch(&green_switch);
+  readSwitch(&blue_switch);
+}
+
+void printButtons() {
+  if (square_button.pushed_this_frame) {
+    Serial.println("square_button pushed");
+  }
+  if (silver_button.pushed_this_frame) {
+    Serial.println("silver_button pushed");
+  }
+}
+
+void debugButtons() {
+  Serial.print("square: ");
+  Serial.print(digitalRead(SQUARE_BUTTON_PIN));
+  Serial.print(" silver: ");
+  Serial.println(digitalRead(SILVER_BUTTON_PIN));
+}
+
+void debugSwitches() {
+  Serial.print("RGB: ");
+  Serial.print(red_switch.switched_on);
+  Serial.print(green_switch.switched_on);
+  Serial.print(blue_switch.switched_on);
   Serial.println("");
 }
 
 void setup() {
   Serial.begin(115200);
 
+  initInputs();
   initIMU();
   calibrateIMU(250, 250);
 
@@ -153,7 +230,11 @@ void loop() {
     lastTime = currentTime;
 
     doCalculations();
-    printCalculations();
-
+    // printIMUCalculations();
   }
+  readButtons();
+  readSwitches();
+  printButtons();
+  // debugButtons();
+  debugSwitches();
 }
