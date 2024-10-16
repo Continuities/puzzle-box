@@ -1,5 +1,8 @@
 #include <Adafruit_LSM6DS3TRC.h>
 #include <Adafruit_LSM6DS33.h>
+#include <Adafruit_NeoPixel.h>
+
+#define LED_PIN 8
 
 #define SQUARE_BUTTON_PIN 12
 #define SILVER_BUTTON_PIN 11
@@ -24,6 +27,9 @@ Adafruit_LSM6DS33 lsm6ds33;
 bool new_rev = true;
 long int accel_array[6];
 long int check_array[6]={0.00, 0.00, 0.00, 0.00, 0.00, 0.00};
+
+// leds
+Adafruit_NeoPixel pixel = Adafruit_NeoPixel(1, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // inputs
 ButtonState square_button = { SQUARE_BUTTON_PIN, false, false };
@@ -160,6 +166,23 @@ void printIMUCalculations() {
   Serial.println("");
 }
 
+void initLeds() {
+  pixel.begin();
+  pixel.clear();
+  pixel.setBrightness(128);
+  pixel.show();
+}
+
+void updateLeds() {
+  pixel.setPixelColor(
+    0,
+    red_switch.switched_on ? 255 : 0,
+    green_switch.switched_on ? 255 : 0,
+    blue_switch.switched_on ? 255 : 0
+  );
+  pixel.show();
+}
+
 void initInputs() {
   pinMode(square_button.pin, INPUT_PULLUP);
   pinMode(silver_button.pin, INPUT_PULLUP);
@@ -217,6 +240,7 @@ void setup() {
   Serial.begin(115200);
 
   initInputs();
+  initLeds();
   initIMU();
   calibrateIMU(250, 250);
 
@@ -234,6 +258,8 @@ void loop() {
   }
   readButtons();
   readSwitches();
+  updateLeds();
+
   printButtons();
   // debugButtons();
   debugSwitches();
