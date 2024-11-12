@@ -29,6 +29,7 @@ void loop()
   rotation_loop();
   read_buttons();
   read_switches();
+  read_knobs();
   colour_puzzle_logic();
   blink_puzzle_logic(delta);
   update_lights();
@@ -36,4 +37,5 @@ void loop()
   // printButtons();
   // debugButtons();
   // debugSwitches();
+  // debug_knobs();
 }

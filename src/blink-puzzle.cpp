@@ -57,12 +57,12 @@ void blink_puzzle_logic(int delta)
       if (button_in_sync)
       {
         successful_steps++;
-        Serial.print("STEP SUCCESSFUL: ");
+        // Serial.print("STEP SUCCESSFUL: ");
         Serial.println(successful_steps);
       }
       else
       {
-        Serial.println("STEP FAILED!");
+        // Serial.println("STEP FAILED!");
         successful_steps = 0;
       }
       step_completed = true;
